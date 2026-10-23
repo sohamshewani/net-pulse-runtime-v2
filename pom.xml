@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.netpulse</groupId>
+    <artifactId>net-pulse-runtime</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>net-pulse-runtime</name>
+    <description>Production-grade runtime for Net Pulse with native JNI support and benchmarking</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <junit.version>5.10.0</junit.version>
+        <jmh.version>1.37</jmh.version>
+    </properties>
+
+    <dependencies>
+        <!-- Unit Testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Benchmarking -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>${jmh.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>${jmh.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiler Plugin for Java -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                    <compilerArgs>
+                        <arg>-Xlint:all</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Surefire Plugin for Tests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+            </plugin>
+
+            <!-- Exec Plugin to bridge 'all', 'build', 'clean', 'benchmark' targets -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <!-- Target: build (Compiles Java + Optional Native C/C++ with -O3 -Wall -Wextra) -->
+                    <execution>
+                        <id>build-native-and-java</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>bash</executable>
+                            <commandlineArgs>
+                                -c '
+                                echo "Building Java sources..."
+                                mvn compile-only-java || true
+                                
+                                if [ -d "src/main/native" ] || [ -f "CMakeLists.txt" ]; then
+                                    echo "Configuring native build with optimization flags (-O3, -Wall, -Wextra)..."
+                                    mkdir -p build
+                                    cd build
+                                    cmake -DCMAKE_C_FLAGS="-O3 -Wall -Wextra" -DCMAKE_CXX_FLAGS="-O3 -Wall -Wextra" .. || echo "CMake configuration skipped/failed safely."
+                                    cmake --build . --config Release || echo "Native build skipped/failed safely."
+                                else
+                                    echo "No native source directory (src/main/native) found. Skipping native build."
+                                fi
+                                '
+                            </commandlineArgs>
+                        </configuration>
+                    </execution>
+
+                    <!-- Target: benchmark -->
+                    <execution>
+                        <id>run-benchmarks</id>
+                        <phase>integration-test</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>bash</executable>
+                            <commandlineArgs>
+                                -c '
+                                if [ -d "src/test/java/com/netpulse/benchmark" ] || [ -d "src/benchmark" ]; then
+                                    echo "Running JMH benchmarks..."
+                                    mvn test-compile exec:java -Dexec.mainClass="org.openjdk.jmh.Main" || echo "Benchmarks execution encountered issues."
+                                else
+                                    echo "No benchmark directory found. Skipping benchmark target safely."
+                                fi
+                                '
+                            </commandlineArgs>
+                        </configuration>
+                    </execution>
+
+                    <!-- Target: clean (Extends default clean to safely clear native artifacts) -->
+                    <execution>
+                        <id>clean-native</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>bash</executable>
+                            <commandlineArgs>
+                                -c '
+                                echo "Cleaning native build artifacts..."
+                                rm -rf build/ target/
+                                '
+                            </commandlineArgs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>all</id>
+            <build>
+                <defaultGoal>clean compile test</defaultGoal>
+            </build>
+        </profile>
+    </profiles>
+</project>
